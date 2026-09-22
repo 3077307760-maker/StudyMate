@@ -26,3 +26,48 @@ def test_upload_validation_rejects_disguised_file_and_path_names() -> None:
     suffix, name = validate_upload("notes.md", "text/markdown", "课程内容".encode())
     assert suffix == ".md"
     assert name == "notes.md"
+
+def test_quiz_validation_accepts_multiple_slides_from_same_document() -> None:
+    from app.schemas import QuizCreate
+    from app.services.quiz_service import _validate_generated_quiz
+
+    context = [
+        {
+            "document_id": "doc-1",
+            "page": None,
+            "slide": 1,
+            "snippet": "outline slide content",
+        },
+        {
+            "document_id": "doc-1",
+            "page": None,
+            "slide": 2,
+            "snippet": "second slide content for citation validation",
+        },
+    ]
+    questions = []
+    for index in range(5):
+        questions.append(
+            {
+                "type": "single_choice",
+                "stem": f"Question {index + 1}",
+                "options": ["A option", "B option", "C option", "D option"],
+                "correct_answer": "A",
+                "explanation": "Explanation",
+                "knowledge_tags": ["tag"],
+                "citations": [
+                    {
+                        "document_id": "doc-1",
+                        "page": None,
+                        "slide": 2,
+                        "snippet": "second slide content for citation validation",
+                    }
+                ],
+            }
+        )
+    payload = QuizCreate(
+        document_ids=["doc-1"],
+        question_count=5,
+        question_types=["single_choice"],
+    )
+    _validate_generated_quiz({"questions": questions}, payload, context)

@@ -408,13 +408,11 @@ def _validate_generated_quiz(
     questions = payload.get("questions")
     if not isinstance(questions, list) or len(questions) != request.question_count:
         raise ValueError("question count mismatch")
-    allowed_documents = {
-        str(item["document_id"]): {
-            "page": item.get("page"),
-            "slide": item.get("slide"),
-        }
-        for item in context
-    }
+    allowed_documents: dict[str, list[dict[str, Any]]] = {}
+    for item in context:
+        document_id = str(item["document_id"])
+        allowed_documents.setdefault(document_id, []).append(item)
+
     for item in questions:
         if item.get("type") not in {"single_choice", "short_answer"}:
             raise ValueError("unsupported question type")
@@ -433,13 +431,23 @@ def _validate_generated_quiz(
                 raise ValueError("invalid single choice")
         for citation in item["citations"]:
             document_id = str(citation.get("document_id", ""))
-            if document_id not in allowed_documents:
+            if not _citation_matches_context(citation, allowed_documents.get(document_id, [])):
                 raise ValueError("citation outside retrieval context")
-            source = allowed_documents[document_id]
-            if citation.get("page") not in {None, source["page"]}:
-                raise ValueError("citation page mismatch")
-            if citation.get("slide") not in {None, source["slide"]}:
-                raise ValueError("citation slide mismatch")
+
+
+def _citation_matches_context(
+    citation: dict[str, Any], candidates: list[dict[str, Any]]
+) -> bool:
+    for source in candidates:
+        if citation.get("page") not in {None, source.get("page")}:
+            continue
+        if citation.get("slide") not in {None, source.get("slide")}:
+            continue
+        snippet = str(citation.get("snippet", "")).strip()
+        source_snippet = str(source.get("snippet", "")).strip()
+        if snippet and (snippet in source_snippet or source_snippet[:80] in snippet):
+            return True
+    return False
 
 
 def _simple_tokens(text: str) -> list[str]:
