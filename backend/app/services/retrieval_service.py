@@ -27,7 +27,10 @@ class RetrievalResult:
     def sufficient(self) -> bool:
         if not self.hits:
             return False
-        use_semantic_threshold = settings.enable_chroma and settings.embedding_provider != "local"`n        threshold = EVIDENCE_THRESHOLD if use_semantic_threshold else LOCAL_FALLBACK_THRESHOLD
+        use_semantic_threshold = (
+            settings.enable_chroma and settings.embedding_provider != "local"
+        )
+        threshold = EVIDENCE_THRESHOLD if use_semantic_threshold else LOCAL_FALLBACK_THRESHOLD
         return not self.enforce_threshold or self.hits[0].score >= threshold
 
 
