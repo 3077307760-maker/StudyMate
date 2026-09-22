@@ -227,7 +227,7 @@ class ChromaVectorIndex:
             vector_score = max(0.0, 1.0 - float(distance))
             score = (
                 keyword_score
-                if settings.embedding_provider == "local"
+                if settings.uses_local_embeddings
                 else 0.75 * vector_score + 0.25 * keyword_score
             )
             hits.append(

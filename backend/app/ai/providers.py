@@ -49,7 +49,7 @@ class AiProvider:
             else None
         )
         provider = settings.embedding_provider.strip().lower()
-        self.use_local_embedding = provider == "local" or (
+        self.use_local_embedding = settings.uses_local_embeddings or (
             provider == "auto"
             and not (settings.embedding_api_key or settings.llm_api_key)
         )

@@ -34,6 +34,15 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
+    def uses_local_embeddings(self) -> bool:
+        provider = self.embedding_provider.strip().lower()
+        if provider == "local":
+            return True
+        if provider == "api":
+            return False
+        return not (self.embedding_api_key or self.llm_api_key)
+
+    @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
 
