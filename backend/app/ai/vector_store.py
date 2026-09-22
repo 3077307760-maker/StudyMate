@@ -225,6 +225,11 @@ class ChromaVectorIndex:
         ):
             keyword_score = _keyword_score(set(_tokens(query)), set(_tokens(content or "")))
             vector_score = max(0.0, 1.0 - float(distance))
+            score = (
+                keyword_score
+                if settings.embedding_provider == "local"
+                else 0.75 * vector_score + 0.25 * keyword_score
+            )
             hits.append(
                 VectorHit(
                     chunk_id=str(chunk_id),
@@ -234,7 +239,7 @@ class ChromaVectorIndex:
                     slide=int(metadata.get("slide") or 0) or None,
                     section=str(metadata.get("section") or "") or None,
                     content=content or "",
-                    score=0.75 * vector_score + 0.25 * keyword_score,
+                    score=score,
                 )
             )
         return hits
