@@ -77,8 +77,55 @@ def test_ai_provider_supports_chat_only_with_local_embedding(monkeypatch) -> Non
     from app.core.config import settings
 
     monkeypatch.setattr(settings, "llm_api_key", "test-key")
+    monkeypatch.setattr(settings, "llm_base_url", "https://api.deepseek.com/v1")
     monkeypatch.setattr(settings, "embedding_provider", "local")
     provider = AiProvider()
     assert provider.chat_enabled is True
     assert provider.embedding_client is None
     assert len(provider.embed(["alpha beta"])[0]) == 256
+
+def test_quiz_validation_normalizes_model_citation_to_real_chunk() -> None:
+    from app.schemas import QuizCreate
+    from app.services.quiz_service import _validate_generated_quiz
+
+    context = [
+        {
+            "document_id": "real-document-id",
+            "file_name": "slides.pptx",
+            "page": None,
+            "slide": 4,
+            "section": "Outline",
+            "snippet": "Outline chapter six network function virtualization",
+            "index": 1,
+        }
+    ]
+    questions = []
+    for index in range(5):
+        questions.append(
+            {
+                "type": "short_answer",
+                "stem": f"Question {index + 1}",
+                "options": None,
+                "correct_answer": "Reference answer",
+                "explanation": "Explanation",
+                "knowledge_tags": ["network"],
+                "citations": [
+                    {
+                        "document_id": "slides.pptx",
+                        "page": 4,
+                        "slide": 4,
+                        "snippet": "Outline chapter six network function virtualization",
+                    }
+                ],
+            }
+        )
+    payload = QuizCreate(
+        document_ids=["real-document-id"],
+        question_count=5,
+        question_types=["short_answer"],
+    )
+    _validate_generated_quiz({"questions": questions}, payload, context)
+    citation = questions[0]["citations"][0]
+    assert citation["document_id"] == "real-document-id"
+    assert citation["slide"] == 4
+    assert citation["page"] is None

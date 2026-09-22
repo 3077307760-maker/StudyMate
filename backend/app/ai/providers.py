@@ -11,6 +11,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from app.ai.deepseek_client import DeepSeekChatClient
 from app.core.config import settings
 from app.core.errors import AppError
 
@@ -35,6 +36,16 @@ class AiProvider:
                 timeout=settings.request_timeout_seconds,
             )
             if self.chat_enabled
+            else None
+        )
+        self.deepseek_client = (
+            DeepSeekChatClient(
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_base_url,
+                model=settings.chat_model,
+                timeout=settings.request_timeout_seconds,
+            )
+            if self.chat_enabled and "deepseek" in settings.llm_base_url.lower()
             else None
         )
         provider = settings.embedding_provider.strip().lower()
@@ -81,19 +92,29 @@ class AiProvider:
         question: str,
         citations: list[dict[str, Any]],
     ) -> Iterator[tuple[str, dict[str, int] | None]]:
-        if not self.client:
-            yield self._local_answer(question, citations), self._local_usage(question, citations)
-            return
-        system_prompt = load_prompt("chat/v1.md") or "只能依据资料回答，并用引用编号标注。"
+        system_prompt = load_prompt("chat/v1.md") or "Answer only from course material citations."
         context = "\n\n".join(
-            f"[{item['index']}] 文件：{item['file_name']}；"
-            f"位置：{_citation_location(item)}\n内容：{item['snippet']}"
+            f"[{item['index']}] File: {item['file_name']}; "
+            f"Location: {_citation_location(item)}\nContent: {item['snippet']}"
             for item in citations
         )
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"课程资料：\n{context}\n\n用户问题：{question}"},
+            {"role": "user", "content": f"Course material:\n{context}\n\nQuestion: {question}"},
         ]
+        if self.deepseek_client:
+            try:
+                yield from self.deepseek_client.stream(messages, temperature=0.2)
+            except AppError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise AppError(
+                    "MODEL_UNAVAILABLE", "DeepSeek service is temporarily unavailable.", 503
+                ) from exc
+            return
+        if not self.client:
+            yield self._local_answer(question, citations), self._local_usage(question, citations)
+            return
         try:
             stream = self.client.chat.completions.create(
                 model=settings.chat_model,
@@ -113,9 +134,9 @@ class AiProvider:
                     }
             yield "", usage or {"input_tokens": _approx_tokens(context), "output_tokens": 0}
         except TimeoutError as exc:
-            raise AppError("MODEL_TIMEOUT", "模型响应超时，请稍后重试。", 504) from exc
+            raise AppError("MODEL_TIMEOUT", "Model response timed out.", 504) from exc
         except Exception as exc:  # noqa: BLE001
-            raise AppError("MODEL_UNAVAILABLE", "模型服务暂时不可用，请稍后重试。", 503) from exc
+            raise AppError("MODEL_UNAVAILABLE", "Model service is unavailable.", 503) from exc
 
     def generate_quiz(
         self,
@@ -124,36 +145,59 @@ class AiProvider:
         question_types: Sequence[str],
         chapter: str | None,
     ) -> dict[str, Any]:
-        if not self.client:
-            return self._local_quiz(context, question_count, question_types, chapter)
-        system_prompt = load_prompt("quiz/v1.md") or "仅根据资料生成题目并返回 JSON。"
+        system_prompt = load_prompt("quiz/v1.md") or "Generate JSON questions only from the material."
         context_text = "\n\n".join(
-            f"[{item['index']}] {item['file_name']} {_citation_location(item)}\n{item['snippet']}"
+            f"[{item['index']}] document_id={item['document_id']}; "
+            f"file_name={item['file_name']}; page={item.get('page')}; "
+            f"slide={item.get('slide')}; section={item.get('section')}\n"
+            f"{item['snippet']}"
             for item in context
         )
         user_prompt = (
-            f"章节：{chapter or '全部'}\n题量：{question_count}\n"
-            f"题型：{','.join(question_types)}\n资料：\n{context_text}"
+            f"Chapter: {chapter or 'all'}\nQuestion count: {question_count}\n"
+            f"Question types: {','.join(question_types)}\nMaterial:\n{context_text}"
         )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        if self.deepseek_client:
+            for attempt in range(2):
+                try:
+                    content, _ = self.deepseek_client.complete(messages, temperature=0.3, json_mode=True)
+                    payload = json.loads(_strip_json_fence(content))
+                    self._validate_quiz(payload, question_count)
+                    return payload
+                except AppError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    if attempt == 1:
+                        raise AppError(
+                            "MODEL_OUTPUT_INVALID",
+                            "DeepSeek question output could not be validated.",
+                            502,
+                        ) from exc
+            raise AssertionError("unreachable")
+        if not self.client:
+            return self._local_quiz(context, question_count, question_types, chapter)
         for attempt in range(2):
             try:
                 response = self.client.chat.completions.create(
                     model=settings.chat_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    messages=messages,
                     temperature=0.3,
-                    response_format={"type": "json_object"},
+                    response_format={"type": "json_object"},  # type: ignore[call-overload]
                 )
                 content = response.choices[0].message.content or "{}"
-                payload = json.loads(content)
+                payload = json.loads(_strip_json_fence(content))
                 self._validate_quiz(payload, question_count)
                 return payload
             except Exception as exc:  # noqa: BLE001
                 if attempt == 1:
                     raise AppError(
-                        "MODEL_OUTPUT_INVALID", "模型输出无法通过校验，请稍后重试。", 502
+                        "MODEL_OUTPUT_INVALID",
+                        "Model output could not be validated.",
+                        502,
                     ) from exc
         raise AssertionError("unreachable")
 
@@ -276,3 +320,11 @@ def _citation_payload(citation: dict[str, Any]) -> dict[str, Any]:
 
 def _approx_tokens(text: str) -> int:
     return max(1, len(text) // 2)
+
+def _strip_json_fence(content: str) -> str:
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 2:
+            text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+    return text.strip()

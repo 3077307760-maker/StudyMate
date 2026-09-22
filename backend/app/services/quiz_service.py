@@ -408,10 +408,6 @@ def _validate_generated_quiz(
     questions = payload.get("questions")
     if not isinstance(questions, list) or len(questions) != request.question_count:
         raise ValueError("question count mismatch")
-    allowed_documents: dict[str, list[dict[str, Any]]] = {}
-    for item in context:
-        document_id = str(item["document_id"])
-        allowed_documents.setdefault(document_id, []).append(item)
 
     for item in questions:
         if item.get("type") not in {"single_choice", "short_answer"}:
@@ -429,25 +425,57 @@ def _validate_generated_quiz(
                 "D",
             }:
                 raise ValueError("invalid single choice")
+        normalized_citations: list[dict[str, Any]] = []
         for citation in item["citations"]:
-            document_id = str(citation.get("document_id", ""))
-            if not _citation_matches_context(citation, allowed_documents.get(document_id, [])):
+            source = _match_context_citation(citation, context)
+            if source is None:
                 raise ValueError("citation outside retrieval context")
+            normalized_citations.append(
+                {
+                    "document_id": str(source["document_id"]),
+                    "page": source.get("page"),
+                    "slide": source.get("slide"),
+                    "section": source.get("section"),
+                    "snippet": str(source["snippet"]),
+                    "index": source.get("index"),
+                }
+            )
+        item["citations"] = normalized_citations
 
 
-def _citation_matches_context(
-    citation: dict[str, Any], candidates: list[dict[str, Any]]
-) -> bool:
-    for source in candidates:
-        if citation.get("page") not in {None, source.get("page")}:
+def _match_context_citation(
+    citation: dict[str, Any], context: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    model_document = str(citation.get("document_id", "")).strip()
+    model_snippet = _normalize_whitespace(str(citation.get("snippet", "")))
+    best: tuple[int, dict[str, Any]] | None = None
+    for source in context:
+        document_id = str(source["document_id"])
+        file_name = str(source.get("file_name", ""))
+        document_match = model_document in {document_id, file_name}
+        if not document_match and model_document:
+            document_match = model_document.endswith(file_name) or file_name.endswith(model_document)
+        source_snippet = _normalize_whitespace(str(source.get("snippet", "")))
+        snippet_match = bool(
+            model_snippet
+            and (model_snippet in source_snippet or source_snippet[:80] in model_snippet)
+        )
+        if not document_match and not snippet_match:
             continue
-        if citation.get("slide") not in {None, source.get("slide")}:
-            continue
-        snippet = str(citation.get("snippet", "")).strip()
-        source_snippet = str(source.get("snippet", "")).strip()
-        if snippet and (snippet in source_snippet or source_snippet[:80] in snippet):
-            return True
-    return False
+        score = 5 if model_document == document_id else 3 if document_match else 0
+        if snippet_match:
+            score += 3
+        if citation.get("slide") is not None and citation.get("slide") == source.get("slide"):
+            score += 3
+        if citation.get("page") is not None and citation.get("page") == source.get("page"):
+            score += 2
+        if best is None or score > best[0]:
+            best = (score, source)
+    return best[1] if best else None
+
+
+def _normalize_whitespace(value: str) -> str:
+    return " ".join(value.split())
 
 
 def _simple_tokens(text: str) -> list[str]:
