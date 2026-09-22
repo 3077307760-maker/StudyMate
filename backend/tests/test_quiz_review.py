@@ -75,3 +75,43 @@ def test_ten_question_quiz_is_supported(client: TestClient) -> None:
     )
     assert response.status_code == 201
     assert len(response.json()["questions"]) == 10
+
+def test_wrong_item_practice_and_review_completion(client: TestClient) -> None:
+    headers, course, document = prepare_course(client)
+    quiz = client.post(
+        f"/api/courses/{course['id']}/quizzes",
+        json={
+            "document_ids": [document["id"]],
+            "question_count": 5,
+            "question_types": ["single_choice"],
+        },
+        headers=headers,
+    ).json()
+    client.post(
+        f"/api/quizzes/{quiz['id']}/submit",
+        json={"answers": [{"question_id": item["id"], "answer": "B"} for item in quiz["questions"]]},
+        headers=headers,
+    )
+    wrong = client.get(f"/api/courses/{course['id']}/wrong-items", headers=headers).json()[0]
+    assert wrong["quiz_id"] == quiz["id"]
+
+    practice = client.post(f"/api/wrong-items/{wrong['id']}/practice", headers=headers)
+    assert practice.status_code == 200
+    assert practice.json()["question"]["id"] == wrong["question_id"]
+
+    answer = client.post(
+        f"/api/wrong-items/{wrong['id']}/answer",
+        json={"answer": "A"},
+        headers=headers,
+    )
+    assert answer.status_code == 200
+    assert answer.json()["is_correct"] is True
+
+    completion = client.post(f"/api/review-items/{wrong['id']}/complete", headers=headers)
+    assert completion.status_code == 200
+    assert completion.json()["wrong_item_id"] == wrong["id"]
+
+    plan = client.get(f"/api/courses/{course['id']}/review-plan", headers=headers).json()
+    completed = next(task for task in plan["tasks"] if task["wrong_item_id"] == wrong["id"])
+    assert completed["completed"] is True
+    assert plan["completed"] == 1

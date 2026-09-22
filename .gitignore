@@ -1,0 +1,41 @@
+# Environment
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Runtime data
+data/
+backend/data/
+*.db
+*.sqlite*
+chroma/
+
+# Python
+.venv/
+venv/
+.uv/
+*.egg-info/
+
+# Frontend
+node_modules/
+dist/
+.vite/
+coverage/
+playwright-report/
+test-results/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets and local artifacts
+*.log
+*.tsbuildinfo

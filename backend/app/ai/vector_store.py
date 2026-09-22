@@ -109,8 +109,8 @@ class LocalVectorIndex:
         hits: list[VectorHit] = []
         for chunk in chunks:
             keyword_score = _keyword_score(query_tokens, set(_tokens(chunk.content)))
-            vector_score = cosine(query_embedding, chunk.embedding_json or [])
-            score = 0.75 * vector_score + 0.25 * keyword_score
+            vector_score = max(0.0, cosine(query_embedding, chunk.embedding_json or []))
+            score = 0.0 if keyword_score == 0 else 0.75 * keyword_score + 0.25 * vector_score
             hits.append(
                 VectorHit(
                     chunk_id=chunk.id,

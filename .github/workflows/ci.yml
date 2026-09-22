@@ -1,0 +1,91 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+defaults:
+  run:
+    working-directory: projects/StudyMate/studymate
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: projects/StudyMate/studymate/backend/pyproject.toml
+      - run: pip install -e "backend[test]"
+        working-directory: projects/StudyMate/studymate
+      - run: ruff check .
+        working-directory: projects/StudyMate/studymate/backend
+      - run: mypy app
+        working-directory: projects/StudyMate/studymate/backend
+      - run: pytest --cov=app --cov-report=xml
+        working-directory: projects/StudyMate/studymate/backend
+      - run: python evals/run_eval.py
+        working-directory: projects/StudyMate/studymate
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: projects/StudyMate/studymate/frontend/package-lock.json
+      - run: npm ci
+        working-directory: projects/StudyMate/studymate/frontend
+      - run: npm run lint
+        working-directory: projects/StudyMate/studymate/frontend
+      - run: npm run type-check
+        working-directory: projects/StudyMate/studymate/frontend
+      - run: npm run test
+        working-directory: projects/StudyMate/studymate/frontend
+      - run: npm run build
+        working-directory: projects/StudyMate/studymate/frontend
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    env:
+      APP_SECRET_KEY: ci-only-secret-key
+      LLM_API_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: projects/StudyMate/studymate/frontend/package-lock.json
+      - name: Start application
+        run: docker compose up -d --build
+        working-directory: projects/StudyMate/studymate
+      - name: Wait for API
+        run: |
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/api/health; then exit 0; fi
+            sleep 2
+          done
+          docker compose logs
+          exit 1
+        working-directory: projects/StudyMate/studymate
+      - run: npm ci
+        working-directory: projects/StudyMate/studymate/frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: projects/StudyMate/studymate/frontend
+      - run: npm run test:e2e
+        working-directory: projects/StudyMate/studymate/frontend
+      - name: Application logs
+        if: always()
+        run: docker compose logs
+        working-directory: projects/StudyMate/studymate
+      - name: Stop application
+        if: always()
+        run: docker compose down -v
+        working-directory: projects/StudyMate/studymate

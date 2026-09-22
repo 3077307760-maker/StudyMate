@@ -7,7 +7,7 @@ import time
 from collections.abc import Iterator
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import literal_column, select
 from sqlalchemy.orm import Session
 
 from app.ai import AiProvider
@@ -50,7 +50,7 @@ def list_messages(db: Session, conversation_id: str, user_id: str) -> list[Messa
         db.scalars(
             select(Message)
             .where(Message.conversation_id == conversation.id)
-            .order_by(Message.created_at, Message.id)
+            .order_by(Message.created_at, literal_column("messages.rowid"))
         )
     )
 

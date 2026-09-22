@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai import AiProvider
@@ -177,6 +177,7 @@ def list_wrong_items(db: Session, course_id: str, user_id: str) -> list[dict[str
             "id": wrong.id,
             "course_id": wrong.course_id,
             "question_id": wrong.question_id,
+            "quiz_id": question.quiz_id,
             "knowledge_tag": wrong.knowledge_tag,
             "wrong_count": wrong.wrong_count,
             "consecutive_correct": wrong.consecutive_correct,
@@ -198,7 +199,15 @@ def practice_wrong_item(db: Session, wrong_item_id: str, user_id: str) -> WrongP
     return WrongPracticeOut(
         wrong_item_id=wrong.id,
         question=QuestionPublicOut(**question_public_payload(question)),
-        answer_count=0,
+        answer_count=int(
+            db.scalar(
+                select(func.count())
+                .select_from(AttemptAnswer)
+                .join(Attempt, Attempt.id == AttemptAnswer.attempt_id)
+                .where(Attempt.user_id == user_id, AttemptAnswer.question_id == question.id)
+            )
+            or 0
+        ),
     )
 
 
@@ -246,6 +255,71 @@ def review_plan(db: Session, course_id: str, user_id: str) -> dict[str, Any]:
         "completed": sum(1 for task in tasks if task["completed"]),
     }
 
+
+def submit_wrong_practice(
+    db: Session,
+    wrong_item_id: str,
+    user_id: str,
+    answer: str,
+) -> dict[str, Any]:
+    wrong = db.get(WrongItem, wrong_item_id)
+    if not wrong or wrong.user_id != user_id:
+        raise AppError("NOT_FOUND", "错题不存在。", 404)
+    question = db.get(Question, wrong.question_id)
+    if not question:
+        raise AppError("NOT_FOUND", "错题题目不存在。", 404)
+    is_correct, score = _grade_question(question, answer)
+    _update_wrong_item(db, user_id, wrong.course_id, question, is_correct)
+    attempt = Attempt(quiz_id=question.quiz_id, user_id=user_id, score=score * 100)
+    db.add(attempt)
+    db.flush()
+    db.add(
+        AttemptAnswer(
+            attempt_id=attempt.id,
+            question_id=question.id,
+            user_answer=answer,
+            is_correct=is_correct,
+            score=score,
+        )
+    )
+    db.commit()
+    return {
+        "question_id": question.id,
+        "user_answer": answer,
+        "is_correct": is_correct,
+        "score": score,
+        "correct_answer": question.correct_answer,
+        "explanation": question.explanation,
+        "citations": question.citations_json,
+    }
+
+
+def complete_review_item(db: Session, wrong_item_id: str, user_id: str) -> dict[str, Any]:
+    wrong = db.get(WrongItem, wrong_item_id)
+    if not wrong or wrong.user_id != user_id:
+        raise AppError("NOT_FOUND", "错题不存在。", 404)
+    week_start = (date.today() - timedelta(days=date.today().weekday())).isoformat()
+    completion = db.scalar(
+        select(ReviewCompletion).where(
+            ReviewCompletion.user_id == user_id,
+            ReviewCompletion.wrong_item_id == wrong_item_id,
+            ReviewCompletion.week_start == week_start,
+        )
+    )
+    if not completion:
+        completion = ReviewCompletion(
+            user_id=user_id,
+            wrong_item_id=wrong_item_id,
+            week_start=week_start,
+        )
+        db.add(completion)
+        db.commit()
+        db.refresh(completion)
+    return {
+        "wrong_item_id": wrong_item_id,
+        "week_start": week_start,
+        "completed_at": completion.completed_at,
+    }
 
 def question_public_payload(question: Question) -> dict[str, Any]:
     return {

@@ -24,12 +24,14 @@ from app.services.document_service import (
     reindex_document,
 )
 from app.services.quiz_service import (
+    complete_review_item,
     create_quiz,
     get_quiz,
     list_wrong_items,
     practice_wrong_item,
     review_plan,
     submit_quiz,
+    submit_wrong_practice,
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]

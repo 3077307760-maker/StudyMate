@@ -23,12 +23,14 @@ from app.schemas.api import (
     QuizResultOut,
     QuizSubmitRequest,
     RegisterRequest,
+    ReviewCompletionOut,
     ReviewPlanOut,
     ReviewTaskOut,
     TokenResponse,
     UserOut,
     WrongItemOut,
     WrongPracticeOut,
+    WrongPracticeSubmit,
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]

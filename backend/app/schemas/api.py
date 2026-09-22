@@ -213,10 +213,21 @@ class WrongPracticeOut(BaseModel):
     answer_count: int
 
 
+class WrongPracticeSubmit(BaseModel):
+    answer: str = Field(max_length=2000)
+
+
+class ReviewCompletionOut(BaseModel):
+    wrong_item_id: str
+    week_start: str
+    completed_at: datetime
+
+
 class WrongItemOut(BaseModel):
     id: str
     course_id: str
     question_id: str
+    quiz_id: str
     knowledge_tag: str
     wrong_count: int
     consecutive_correct: int

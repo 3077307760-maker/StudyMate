@@ -8,9 +8,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai import VectorHit, get_vector_index
+from app.core.config import settings
 from app.models import Document
 
 EVIDENCE_THRESHOLD = 0.35
+LOCAL_FALLBACK_THRESHOLD = 0.25
 CANDIDATE_LIMIT = 12
 FINAL_CONTEXT_LIMIT = 4
 
@@ -25,7 +27,8 @@ class RetrievalResult:
     def sufficient(self) -> bool:
         if not self.hits:
             return False
-        return not self.enforce_threshold or self.hits[0].score >= EVIDENCE_THRESHOLD
+        threshold = EVIDENCE_THRESHOLD if settings.enable_chroma else LOCAL_FALLBACK_THRESHOLD
+        return not self.enforce_threshold or self.hits[0].score >= threshold
 
 
 def retrieve(
