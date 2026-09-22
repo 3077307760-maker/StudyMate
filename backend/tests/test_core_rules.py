@@ -71,3 +71,14 @@ def test_quiz_validation_accepts_multiple_slides_from_same_document() -> None:
         question_types=["single_choice"],
     )
     _validate_generated_quiz({"questions": questions}, payload, context)
+
+def test_ai_provider_supports_chat_only_with_local_embedding(monkeypatch) -> None:
+    from app.ai.providers import AiProvider
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "llm_api_key", "test-key")
+    monkeypatch.setattr(settings, "embedding_provider", "local")
+    provider = AiProvider()
+    assert provider.chat_enabled is True
+    assert provider.embedding_client is None
+    assert len(provider.embed(["alpha beta"])[0]) == 256

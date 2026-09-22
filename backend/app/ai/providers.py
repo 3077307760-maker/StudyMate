@@ -26,24 +26,41 @@ def load_prompt(relative_path: str) -> str:
 
 class AiProvider:
     def __init__(self) -> None:
-        self.enabled = bool(settings.llm_api_key)
+        self.chat_enabled = bool(settings.llm_api_key)
+        self.enabled = self.chat_enabled
         self.client = (
             OpenAI(
                 api_key=settings.llm_api_key,
                 base_url=settings.llm_base_url,
                 timeout=settings.request_timeout_seconds,
             )
-            if self.enabled
+            if self.chat_enabled
             else None
         )
+        provider = settings.embedding_provider.strip().lower()
+        self.use_local_embedding = provider == "local" or (
+            provider == "auto"
+            and not (settings.embedding_api_key or settings.llm_api_key)
+        )
+        embedding_key = settings.embedding_api_key or settings.llm_api_key
+        if self.use_local_embedding or not embedding_key:
+            self.embedding_client = None
+        else:
+            self.embedding_client = OpenAI(
+                api_key=embedding_key,
+                base_url=settings.embedding_base_url or settings.llm_base_url,
+                timeout=settings.request_timeout_seconds,
+            )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        if not self.client:
+        if not self.embedding_client:
             return [self._local_embedding(text) for text in texts]
         try:
-            response = self.client.embeddings.create(model=settings.embedding_model, input=texts)
+            response = self.embedding_client.embeddings.create(
+                model=settings.embedding_model, input=texts
+            )
             return [item.embedding for item in response.data]
         except Exception as exc:  # noqa: BLE001
             raise AppError("MODEL_UNAVAILABLE", "向量模型暂时不可用。", 503) from exc

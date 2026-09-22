@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     chat_model: str = "gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
+    embedding_provider: str = "auto"
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
     max_upload_mb: int = 20
     token_expire_seconds: int = 604800
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
